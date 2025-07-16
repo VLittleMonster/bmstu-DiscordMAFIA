@@ -1,0 +1,368 @@
+import discord
+import time
+import asyncio
+
+from roomCode import *
+from permissions import *
+from rolesGen import *
+from numberTable import *
+from rolesGreeting import *
+
+client = discord.Client()
+main_channel = None
+
+# Реакция на запуск бота
+@client.event
+async def on_ready():
+    await client.change_presence(activity = discord.Game(name = "HCF Mafia"))
+    print("_HCF_")
+
+
+# Реакция бота на сообщение
+@client.event
+async def on_message(message):
+
+    if message.content.startswith("/clear"):
+        for guild in client.guilds:
+            for channel in guild.text_channels:
+                if str(channel) != "проект" and str(channel) != "мафия":
+                    await channel.delete()
+                
+    # Игнорируем отлик на сообщения бота
+    if message.author == client.user:
+        return
+        
+    # Игнорируем отлик на сообщения других ботов
+    if message.author.bot:
+        return
+    
+    # Оповестить всех на канале о разработке бота
+    if message.content.startswith("/sayInfo"):
+        for user in message.guild.members:
+            try:
+                await user.send("Привет, мой друг, я скоро заработаю :3")
+            except:
+                pass
+
+    # Реакция бота на сообщение о начале игры
+    if message.content.startswith("/mafia"):
+        try:
+            #_________________Глобальные переменные_________________________
+            
+            global hostID # Айди хоста игры
+            hostID = message.author
+            global constPlayersNumb  # Введенное количество игроков
+            constPlayersNumb = int(message.content.split()[1])
+            global playersNumb # Зарегистрированное количество игроков
+            playersNumb = 0
+            global allMembers # Список всех участников сервера
+            allMembers = message.guild.members
+            global playersList # Список мемберов у зарегистрированных игроков
+            playersList = []
+            global uniqueNumber # Уникальный код для входа в комнату
+            uniqueNumber = codeGen()
+            global rolesList # Список ролей
+            rolesList = []
+            global deadPlayers
+            deadPlayers = []
+            global playersStatus
+            playersStatus = [[], [], []] # Список статусов игроков [[0,0,0,0],[0,0,0,0],[0,0,0,0]]:
+                                         # Первый дочерний список - флаги докторов
+                                         # Второй дочерний список - голосование мафии
+                                         # Третий дочерний список - флаги повторного голосования
+                                         # Нумерация:
+                                         # Для первого и третьего дочернего списка
+                                         # "0" - нет флага
+                                         # "1" - есть флаг
+                                         # Для второго
+                                         # "0" - никто не проголосовал за убийство игрока
+                                         # "1 и больше" - количество проголосовавших за убийство
+            
+            #_______________________________________________________________
+            
+            # Исключения
+            if constPlayersNumb < 1: privet = mir
+            
+            # Создание комнаты для региcтрации
+            await message.channel.send("Комната для игры успешно создана, вот ее уникальный номер: "\
+             + '\n"' + uniqueNumber + '"')
+            await message.channel.send("Чтобы присоединиться к игре, напишите в чат следующее:" + '\n"/join ' +\
+             uniqueNumber + '"\n')
+            
+        # Неправильный ввод количества участников
+        except:
+            await message.channel.send("Зарегистрируйте комнату правильно:" +\
+             '\n"/mafia количество игроков"')
+            await message.channel.send("Внимание:\nМинимальное количество игроков = 5\n" +\
+            "Максимальное количество игроков = 27")
+            
+    # Регистрация в игре
+    if message.content == "/join " + uniqueNumber:
+        # Проверка на вход в уже начавшуюся игру
+        if playersNumb >= constPlayersNumb:
+            await message.channel.send("К сожалению, вы опоздали. Игра уже началась")
+            return
+            
+        # Проверка на зарегистрированность пользователя в игре
+        if message.author not in playersList:
+            playersNumb += 1
+            playersList.append(message.author)
+            playersStatus[0].append(0)
+            playersStatus[1].append(0)
+            playersStatus[2].append(0)
+        else:
+            await message.channel.send("Вы уже зарегистрированы в игре!")
+            return
+        
+        # Уведомление пользователя о регистрации и количестве оставшихся участников
+        if playersNumb != constPlayersNumb:
+            await message.channel.send("Вы успешно присоединились к игре!")
+            await message.channel.send(str(constPlayersNumb - playersNumb) + " игроков осталось...")
+            
+        # Создание канала для игры и уведомление участников о конце регистрации
+        else:
+            await message.channel.send("Игра скоро начнется, прошу всех игроков пройти в комнату " +\
+            '"play-room"')
+            await message.guild.create_text_channel("play-room")
+            await message.guild.create_text_channel("mafia")
+        
+    # _____________________Взаимодействие_в_локальном_чате_ночью____________________________________________
+    
+    if message.content.startswith("/heal") and rolesList[playersList.index(message.author)] == "doctor":
+        if playersStatus[2][playersList.index(message.author)] == 1:
+            await message.author.send("Сегодня вы уже сделали свой выбор! Можете ожидать остальных на дневном совете")
+        else:
+            try:
+                if int(message.content.split()[1]) - 1 < 0: privet = mir
+                playersStatus[0][int(message.content.split()[1]) - 1] = 1
+                playersStatus[2][playersList.index(message.author)] = 1
+                await message.author.send(str(playersList[int(message.content.split()[1]) - 1]) +\
+                 " успешно вылечен! Можете ожидать остальных на дневном совете")
+            except:
+                 await message.author.send("Проверьте правильность введенных данных!")
+    
+    if message.content.startswith("/verify") and rolesList[playersList.index(message.author)] == "commissar":
+        if playersStatus[2][playersList.index(message.author)] == 1:
+            await message.author.send("Сегодня вы уже сделали свой выбор! Можете ожидать остальных на дневном совете")
+        else:
+            try:
+                if int(message.content.split()[1]) - 1 < 0: privet = mir
+                if rolesList[int(message.content.split()[1]) - 1] == "mafia":
+                    playersStatus[2][playersList.index(message.author)] = 1
+                    await message.author.send("Вы сделали правильный выбор, данный игрок является мафией.")
+                else:
+                    playersStatus[2][playersList.index(message.author)] = 1
+                    await message.author.send("К сожалению, вы ошиблись с выбором, данный игрок не является мафией.")
+            except:
+                await message.author.send("Проверьте правильность введенных данных!")
+
+    if message.content.startswith("/kill") and rolesList[playersList.index(message.author)] == "mafia":
+        if playersStatus[2][playersList.index(message.author)] == 1:
+            await message.channel.send("Сегодня вы уже сделали свой выбор!")
+        else:
+            try:
+                if int(message.content.split()[1]) - 1 < 0: privet = mir
+                playersStatus[1][int(message.content.split()[1]) - 1] += 1
+                playersStatus[2][playersList.index(message.author)] = 1
+                await message.channel.send("Голос за убийство " + str(playersList[int(message.content.split()[1]) - 1]) +\
+                 " успешно принят!")
+            except:
+                await message.author.send("Проверьте правильность введенных данных!")
+    # _____________________________________________________________________________________________________
+    
+    # _____________________Взаимодействие_в_глобальном_чате_ночью____________________________________________
+    
+    if message.content.startswith("/vote_mafia"):
+        try:
+            if int(message.content.split()[1]) - 1 < 0: privet = mir
+            if playersStatus[0][int(message.content.split()[1])] != -228:
+                playersStatus[0][int(message.content.split()[1])] += 1
+        except:
+            await message.author.send("Проверьте правильность введенных данных!")
+            
+    # _____________________________________________________________________________________________________
+    
+    
+    
+    # Удаление текущей комнаты
+    if message.content.startswith("/delete_room"):
+        await message.channel.delete()
+
+
+# Реакция бота на создание канала
+@client.event
+async def on_guild_channel_create(channel):
+    # Глобальные переменные
+    global main_channel
+    global mafia_channel
+    global rolesList
+    global playersStatus
+    
+    if str(channel) == "play-room":
+        main_channel = channel # Основной канал игры
+        
+        # Формирование списка ролей
+        rolesList = formRoles(rolesList, playersNumb)
+    
+        # Стандартная защита от всех участников сервера
+        for member in allMembers:
+            await defaultProtection(main_channel, member)
+            
+        # Наступление ночи в игре (блокировка глобального чата)
+        for player in allMembers:
+            await night(main_channel, player)
+            
+        await channel.send("Добрый вечер, леди и джентельмены, игра началась!")
+        await channel.send("Город засыпает... Просыпается мафия!")
+            
+        print(rolesList)
+
+        # Знакомство с ролями в локальном чате
+        for member in range(len(playersList)):
+            if rolesList[member] == "friendly":
+                await friendlyGreeting(playersList[member])
+            elif rolesList[member] == "doctor":
+                await doctorGreeting(playersList[member], playersList)
+            elif rolesList[member] == "commissar":
+                await commissarGreeting(playersList[member], playersList)
+            else:
+                await mafiaGreeting(playersList[member])
+
+    elif str(channel) == "mafia":
+        mafia_channel = channel # Канал для мафии
+        
+        # Стандартная защита от всех участников сервера
+        for member in allMembers:
+            await defaultProtection(mafia_channel, member)
+            
+        # Наступление ночи в игре (открытие чата для мафии)
+        for i in range(len(rolesList)):
+            if rolesList[i] == "mafia":
+                await mafia_night(mafia_channel, playersList[i])
+
+        # Знакомство мафии в своем текстовом канале
+        await mafiaChannelGreeting(mafia_channel, playersList)
+                
+        # Задержка для голосования ночью в локальном чате
+        await asyncio.sleep(40)
+    
+        print(playersStatus)
+        
+        await mafia_channel.send("Время для голосования истекло! Прошу пройти на дневной совет")
+        
+        # Сообщение в локальный чат для доктора и комиссара о прекращении голосования
+        for i in range(len(playersList)):
+            if rolesList[i] == "doctor":
+                await playersList[i].send("Время для голосования истекло! Прошу пройти на дневной совет")
+            if rolesList[i] == "commissar":
+                await playersList[i].send("Время для голосования истекло! Прошу пройти на дневной совет")
+        
+        # Наступление утра в игре (закрытие чата для мафии)
+        for i in range(len(rolesList)):
+            if rolesList[i] == "mafia":
+                await mafia_day(mafia_channel, playersList[i])
+        
+        # Наступление утра в игре (открытие глобального чата)
+        for player in allMembers:
+            await day(main_channel, player)
+   
+        await main_channel.edit(name = "iu7gg")
+        
+# Смена ночи на день
+@client.event
+async def on_guild_channel_update(before, after):
+    # Глобальные переменные
+    global main_channel
+    global playersList
+    global rolesList
+    global playersStatus
+    global deadPlayers
+    
+    if str(after) == "iu7gg":
+
+        mafiaVote = max(playersStatus[1])
+        maxCounter = 0
+        mafiaChoice = -228
+        
+        # Подсчет количества максимумов голосов мафии
+        for i in range(len(playersList)):
+            if playersStatus[1][i] == mafiaVote:
+                maxCounter += 1
+        
+        # Если мафия определилась с выбором
+        if maxCounter == 1:
+            mafiaChoice = playersStatus[1].index(mafiaVote)
+
+        # Проверка на совпадение с выбором доктора
+        if ((playersStatus[0][mafiaChoice] != 1) and (mafiaChoice != -228)):
+            playersStatus[0][mafiaChoice] = 2
+
+        await main_channel.send("Ночь подошла к концу...Город просыпается.")
+        await main_channel.send("Итоги сегодняшней ночи...")
+        
+        # Результаты ночи
+        deadFlag = 0
+        for i in range(len(playersStatus)):
+            if playersStatus[0][i] == 2:
+                await main_channel.send("Сегодня город проснулся без " + str(playersList[i]))
+                deadPlayers.append(playersList[i])
+                playersStatus[0][i] = -228
+                playersList[i] = ""
+                deadFlag = 1
+            elif playersStatus[0][i] == 1:
+                playersStatus[0][i] = 0
+                deadFlag = 1
+                await main_channel.send("Доктору удалось спасти жизнь " + str(playersList[i]))
+        if deadFlag == 0:
+            main_channel.send("В эту ночь не случилось ничего примечательного...")
+
+        await main_channel.send("Итак, Городу предстоит выяснить, кто из жителей - Мафия?")
+        await main_channel.send("У вас есть ... минут для обсуждения и выбора мафии. " +\
+        "После этого каждый должен написать /vote_mafia + номер игрока, которого вы считаете мафией.")
+        await main_channel.send(numberedList(playersList))
+        
+        await asyncio.sleep(40)
+
+        playerVote = max(playersStatus[0])
+        maxCounter = 0
+        playerChoice = -228
+          
+        # Подсчет количества максимумов голосов игроков
+        for i in range(len(playersList)):
+            if playersStatus[0][i] == playerVote:
+                maxCounter += 1
+                
+        # Результаты дневного голосования
+        if maxCounter == 1:
+            playerChoice = playersStatus[0].index(playerVote)
+            playersStatus[0][playerChoice] = -228
+            deadPlayers.append(playersList[playerChoice])
+            playersList[playerChoice] = ""
+            await main_channel.send("Город решил, что Мафия - " + playersList[playerChoice])
+        else:
+            await main_channel.send("Игроки не смогли договориться...")
+        
+        #await nigth(main_channel, playersList)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+if __name__ == "__main__":
+    uniqueNumber = "" # Для избежания ошибки идентификации при присоединении к пустой комнате
+    client.run("NzA5ODQ2MzU1MTQ0NjA1ODAy.Xsb9_g.cCa6C5X7cbS_Ops51Vz7N40-WWA")
